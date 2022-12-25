@@ -1,6 +1,6 @@
 ## Create assign material 
 
-A simple blender addon, which helps with mateiral creation and assignment.
+A simple and slim blender addon which helps with material creation and assignment.
 
 
 ## Features
