@@ -36,7 +36,7 @@ The addon supports a few ways to get access to these features.
 
 ![grafik](https://user-images.githubusercontent.com/13512160/209481205-7f42966e-1a18-463c-abfc-089d4d72b09c.png)
 
-3. add a header menu - enable this in the addon preferences
-
+3. add a header menu - you can enable this in the addon preferences - off by default
+ 
 ![grafik](https://user-images.githubusercontent.com/13512160/209481221-affeac4f-122c-4ee3-9156-fd595b9c8b9a.png)
 
