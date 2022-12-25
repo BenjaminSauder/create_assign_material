@@ -9,7 +9,8 @@ bl_info = {
     "author": "Benjamin Sauder",
     "blender": (3, 1, 0),
     "description": "Creates and assigns a material to the selected objects/faces.",
-    "category": "Object"
+    "category": "Object",
+    "doc_url": "https://github.com/BenjaminSauder/create_assign_material",
 }
 
 
@@ -307,7 +308,11 @@ class AddonPrefs (bpy.types.AddonPreferences):
    
     def draw(self, context):
         layout = self.layout
-        layout.label(text="This is a preferences view for our add-on")
+        layout.label(text='The addon creates keymap items to open a regular menu or a pie menu.')
+        layout.label(text='Choose whatever you prefer - by default no hotkeys are assigned.')
+        layout.label(text='Check the keymap editor in 3D View > 3D View (Global)')
+        layout.separator()
+        layout.label(text="This options adds a menu to the 3d view menu bar")
         layout.prop(self, "menu_visible")
             
 
@@ -316,7 +321,7 @@ class AddonPrefs (bpy.types.AddonPreferences):
 class VIEW3D_MT_Material(bpy.types.Menu):
     bl_label = "Material"
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
         layout.operator_context = 'INVOKE_REGION_WIN'
 
@@ -332,8 +337,8 @@ class VIEW3D_MT_Material(bpy.types.Menu):
 
 class VIEW3D_MT_Material_PIE(bpy.types.Menu):
     bl_label = 'Material'
-    bl_idname = 'VIEW3D_MT_Material_PIE'
-
+    bl_idname = 'material.create_assign_pie' 
+   
     def draw(self, context):
         layout = self.layout
         pie = layout.menu_pie()
@@ -358,25 +363,40 @@ def register():
     bpy.utils.register_class(MaterialCreateAssign)
     bpy.utils.register_class(MaterialPick)
 
-    # keymaps
+    # keymaps & prefs
+    preferences = bpy.context.preferences
+    addon_prefs = preferences.addons[__name__].preferences
+
+    if addon_prefs.menu_visible:
+        bpy.types.VIEW3D_MT_editor_menus.append(VIEW3D_MT_Material.menu_draw)
+
     wm = bpy.context.window_manager     
     if  wm.keyconfigs.addon:
-        key_map = wm.keyconfigs.addon.keymaps.new(name='3D View', space_type='VIEW_3D')
-        key_map_item = key_map.keymap_items.new("wm.call_menu_pie", type="NONE", value='PRESS', ctrl=False)
-        key_map_item.properties.name = "VIEW3D_MT_Material_PIE"              
-        addon_keymaps.append((key_map, key_map_item))
+        keymap = wm.keyconfigs.addon.keymaps.new(name='3D View', space_type='VIEW_3D')
 
-        key_map_item = key_map.keymap_items.new("wm.call_menu", type="NONE", value='PRESS', ctrl=False)
-        key_map_item.properties.name = "VIEW3D_MT_Material"              
-        addon_keymaps.append((key_map, key_map_item))
+        keymap_item = keymap.keymap_items.new("wm.call_menu_pie", type="NONE", value='PRESS', ctrl=False)
+        keymap_item.properties.name = "material.create_assign_pie" 
+        print(keymap_item)             
+        addon_keymaps.append((keymap, keymap_item))
+
+        keymap_item = keymap.keymap_items.new("wm.call_menu", type="NONE", value='PRESS', ctrl=False)
+        keymap_item.properties.name = "VIEW3D_MT_Material"              
+        print(keymap_item)
+        addon_keymaps.append((keymap, keymap_item))
 
 
 
 def unregister():   
-    # keymaps
-    for km, kmi in addon_keymaps:
-            km.keymap_items.remove(kmi)
+    # keymaps & prefs
+    preferences = bpy.context.preferences
+    addon_prefs = preferences.addons[__name__].preferences
+
+    for keymap, keymap_item in addon_keymaps:
+        keymap.keymap_items.remove(keymap_item)
     addon_keymaps.clear()   
+
+    if addon_prefs.menu_visible:
+        bpy.types.VIEW3D_MT_editor_menus.remove(VIEW3D_MT_Material.menu_draw)
 
     # ui
     bpy.utils.unregister_class(AddonPrefs)
