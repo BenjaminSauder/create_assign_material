@@ -18,7 +18,7 @@ Choose your prefered shader, base color and name for this material. The color is
 
 ### Pick material
 
-Pick a material from the scene and then it will get applied the same way as if you would call 'Create material'
+Pick a material from the scene and then it will get applied the same way as if you would call 'Create material'.
 
 ### Cleanup material slots
 
