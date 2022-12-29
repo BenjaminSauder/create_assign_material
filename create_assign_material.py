@@ -3,7 +3,6 @@ import bmesh
 
 from bpy_extras import view3d_utils
 
-
 bl_info = {
     "name": "Create Assign Material",
     "author": "Benjamin Sauder",
@@ -14,7 +13,9 @@ bl_info = {
 }
 
 
+# -------------------------------------
 # Operators
+# -------------------------------------
 
 class MaterialSlotCleanup(bpy.types.Operator):
     """Remove unused material slots from selected object"""
@@ -30,14 +31,12 @@ class MaterialSlotCleanup(bpy.types.Operator):
         return self.execute(context)
 
     def execute(self, context):
-        mode = context.mode
-
-        if mode != 'OBJECT':
+        if context.mode != 'OBJECT':
             bpy.ops.object.editmode_toggle()
            
         bpy.ops.object.material_slot_remove_unused()
         
-        if mode != 'OBJECT':
+        if context.mode != 'OBJECT':
             bpy.ops.object.editmode_toggle()          
 
         return {'FINISHED'}
@@ -50,8 +49,7 @@ class MaterialCreateAssignMethods():
         object.data.materials.append(material)
     
 
-    def apply_material_to_polygons(self, object, material, cleanup_slots):
-        
+    def apply_material_to_polygons(self, object, material, cleanup_slots):        
         bm = bmesh.from_edit_mesh(object.data)            
         selected_faces = [f.index for f in bm.faces if f.select]
         all_faces_selected = len(bm.faces) == len(selected_faces)
@@ -85,8 +83,7 @@ class MaterialCreateAssignMethods():
             bpy.ops.object.mode_set(mode='EDIT')
 
 
-    # lets keep the material enum close to the usage function
-
+    # lets keep the shader_types enum close to the usage function
     shader_types = [
         ("Principled", "Principled BSDF", "", "", 0),
         ("Diffuse", "Diffuse BSDF", "", "", 1),
@@ -237,7 +234,7 @@ class MaterialPick(bpy.types.Operator, MaterialCreateAssignMethods):
             eval_obj = object.evaluated_get(depsgraph)
             material_index = eval_obj.data.polygons[index].material_index
             material_eval = eval_obj.data.materials[material_index]
-            #do NOT reference an evaulated ID
+            # do NOT reference an evaulated ID
             material = bpy.data.materials.get(material_eval.name)
             return material
 
@@ -287,7 +284,75 @@ class MaterialPick(bpy.types.Operator, MaterialCreateAssignMethods):
             return {'CANCELLED'}
 
 
+
+class MaterialAssign(bpy.types.Operator, MaterialCreateAssignMethods):    
+    '''Assigns a material to current selection'''
+    bl_idname = "object.material_assign"
+    bl_label = "Assign Material"    
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+        
+    material_name: bpy.props.StringProperty(name='Material Name', maxlen=63)
+    show_list_dialog: bpy.props.BoolProperty(name="Pick from List", default=False)
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.selected_objects) > 0
+
+    def invoke(self, context, event):
+        if self.show_list_dialog:
+            bpy.types.Scene.material_list = bpy.props.CollectionProperty(type=Material_PG_Collection)
+            bpy.types.Scene.material_index = bpy.props.IntProperty()
+
+            context.scene.material_list.clear()
+            for m in bpy.data.materials:
+                
+                if m.is_grease_pencil:
+                    continue
+
+                item = context.scene.material_list.add()
+                item.name = m.name
+                item.material = m
+
+            return context.window_manager.invoke_props_dialog(self, width = 400)
+        else:
+            return self.execute(context)
+        
+    def execute(self, context):
+        if self.show_list_dialog:
+            self.material_name = context.scene.material_list[context.scene.material_index].name
+            del bpy.types.Scene.material_list
+            del bpy.types.Scene.material_index 
+        
+        if not self.material_name:
+            return {'FINISHED'}
+
+        material = bpy.data.materials.get(self.material_name)
+
+        if context.mode == "EDIT_MESH":                   
+            for object in context.selected_objects:
+                if object.type == 'MESH':
+                    self.apply_material_to_polygons(object, material, False)
+        
+        elif context.mode == "OBJECT":                   
+            for object in context.selected_objects:
+                if object.type in {'MESH', 'CURVE', 'FONT', 'SURFACE', 'META'}:
+                    self.apply_material_to_object(object, material)        
+
+        return {'FINISHED'}
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+
+        col.prop_search(self, "material_name", bpy.data, "materials")       
+        
+        # scene = bpy.context.scene
+        # col.template_list("Material_UL_items", "material_list", scene, "material_list", scene, "material_index", rows=12)
+
+
+# -------------------------------------
 # Preferences
+# -------------------------------------
 
 class AddonPrefs (bpy.types.AddonPreferences):
     bl_idname = __name__
@@ -296,15 +361,11 @@ class AddonPrefs (bpy.types.AddonPreferences):
         if self.menu_visible:
             bpy.types.VIEW3D_MT_editor_menus.append(VIEW3D_MT_Material.menu_draw)
         else:
-            bpy.types.VIEW3D_MT_editor_menus.remove(VIEW3D_MT_Material.menu_draw)
-
-
-    def update_pie_menu_hotkey(self, context):
-        wm = bpy.context.window_manager           
+            bpy.types.VIEW3D_MT_editor_menus.remove(VIEW3D_MT_Material.menu_draw) 
       
-    menu_visible: bpy.props.BoolProperty(name="Add material menu", default=False, update=update_menu_state)    
-    pie_menu_hotkey: bpy.props.StringProperty(name="Pie menu hotkey", default="", update=update_pie_menu_hotkey)
-
+    menu_visible: bpy.props.BoolProperty(name="Add 'Material' menu to the 3d view menus", default=False, update=update_menu_state)    
+    show_material_selection: bpy.props.BoolProperty(name="Show the material selection", default=True)
+    max_materials_in_menu: bpy.props.IntProperty(name="Max materials in list", default=50, min=1)
    
     def draw(self, context):
         layout = self.layout
@@ -312,24 +373,79 @@ class AddonPrefs (bpy.types.AddonPreferences):
         layout.label(text='Choose whatever you prefer - by default no hotkeys are assigned.')
         layout.label(text='Check the keymap editor in 3D View > 3D View (Global)')
         layout.separator()
-        layout.label(text="This options adds a menu to the 3d view menu bar")
         layout.prop(self, "menu_visible")
-            
+        layout.separator()
+        layout.label(text="Adds a list of materials to the pie or menu. This allows to directly choose an existing material.")
+        
+        row = layout.row()
+        row.prop(self, "show_material_selection")
+        row.prop(self, "max_materials_in_menu")
 
+# -------------------------------------
 # UI code
+# -------------------------------------
 
-class VIEW3D_MT_Material(bpy.types.Menu):
-    bl_label = "Material"
+class MATERIAL_UL_MaterialCollection(bpy.types.UIList):    
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        mat = item.material  
+        if mat:
+            layout.prop(mat, "name", text=mat.name, emboss=False, icon_value=layout.icon(mat))
+
+class VIEW3D_MT_MaterialList(bpy.types.Menu):
+    bl_idname = "VIEW3D_MT_MaterialList"
+    bl_label = "Assign Material"
 
     def draw(self, context):
         layout = self.layout
-        layout.operator_context = 'INVOKE_REGION_WIN'
 
+        addon_prefs = get_preferences()
+
+        box = layout.split()
+        column = box.column(align=True)
+
+        op = column.operator("object.material_assign", text="Search", icon = "VIEWZOOM")
+        op.show_list_dialog = True
+        
+        grid_flow_columns = 3
+        grid = column.grid_flow(columns=grid_flow_columns)
+
+        material_count = 0
+        materials = bpy.data.materials.items()
+        for material_name, material in materials:
+            if material.is_grease_pencil:
+                continue
+        
+            if (type(material.preview) is bpy.types.ImagePreview):
+                op = grid.operator("object.material_assign", text=material_name, icon_value=material.preview.icon_id)
+            else:
+                op = grid.operator("object.material_assign", text=material_name, icon='MATERIAL_DATA')
+            
+            op.material_name = material_name
+            op.show_list_dialog = False
+        
+            # stop if list gets very large
+            material_count += 1
+            if material_count >= addon_prefs.max_materials_in_menu:
+                break
+      
+
+
+class VIEW3D_MT_Material(bpy.types.Menu):
+    bl_label = "Material"
+  
+    def draw(self, context):       
+        layout = self.layout
+       
         layout.operator("object.material_create_assign", text="Create material", icon = "MATERIAL_DATA")
         layout.separator()
         layout.operator("object.material_slot_cleanup", text="Cleanup material slots", icon = "SHADERFX")
         layout.separator()
         layout.operator("object.material_pick", text="Pick material",  icon = "EYEDROPPER")
+
+       
+        addon_prefs = get_preferences()
+        if addon_prefs.show_material_selection:
+            layout.menu(VIEW3D_MT_MaterialList.bl_idname)      
 
     def menu_draw(self, context):
         self.layout.menu("VIEW3D_MT_Material")
@@ -337,36 +453,115 @@ class VIEW3D_MT_Material(bpy.types.Menu):
 
 class VIEW3D_MT_Material_PIE(bpy.types.Menu):
     bl_label = 'Material'
-    bl_idname = 'material.create_assign_pie' 
-   
+    bl_idname = 'VIEW3D_MT_create_assign_pie' 
+    
     def draw(self, context):
         layout = self.layout
-        pie = layout.menu_pie()
-        
-        pie.operator("object.material_create_assign", text="Create material", icon = "MATERIAL_DATA")
-        pie.operator("object.material_pick", text="Pick material", icon = "EYEDROPPER")
-        pie.operator("object.material_slot_cleanup", text="Cleanup material slots", icon = "SHADERFX")
-        
+        pie = layout.menu_pie()   
+    
+        addon_prefs = get_preferences()
 
-# Addon registering boilerplate      
+        # left
+        pie.operator("object.material_create_assign", text="Create material", icon = "MATERIAL_DATA")
+        # right
+        pie.operator("object.material_pick", text="Pick material", icon = "EYEDROPPER")
+       
+        # bottom
+        if addon_prefs.show_material_selection:
+            materials = bpy.data.materials.items()
+            
+            box = pie.split()
+            column = box.column(align=False)
+            
+            row = column.split()
+                       
+            row.separator(factor=0.2)
+
+            row.scale_y = 1.5
+            row.scale_x = 5.0
+            op = row.operator("object.material_assign", text="Search material", icon = "VIEWZOOM")
+            op.show_list_dialog = True
+            
+            row.separator(factor=0.2)
+            row.scale_x = 1.0
+
+            column.separator()
+            grid_flow_columns = 6
+            grid = column.grid_flow(columns=grid_flow_columns)
+
+            material_count = 0
+            
+            for material_name, material in materials:
+                if material.is_grease_pencil:
+                    continue
+            
+                if (type(material.preview) is bpy.types.ImagePreview):
+                    op = grid.operator("object.material_assign", text=material_name, icon_value=material.preview.icon_id)
+                else:
+                    op = grid.operator("object.material_assign", text=material_name, icon='MATERIAL_DATA')
+                
+                op.material_name = material_name
+                op.show_list_dialog = False
+            
+                # stop if list gets very large
+                material_count += 1                
+                if material_count >= addon_prefs.max_materials_in_menu:
+                    break
+        else:
+            op = pie.operator("object.material_assign", text="Search material", icon = "VIEWZOOM")
+            op.show_list_dialog = True
+        
+        # top
+        pie.operator("object.material_slot_cleanup", text="Cleanup material slots", icon = "SHADERFX")
+       
+ 
+class Material_PG_Collection(bpy.types.PropertyGroup):
+    material: bpy.props.PointerProperty(name="Material", type=bpy.types.Material)       
+
+
+class Material_UL_items(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        mat = item.material
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            layout.prop(mat, "name", text="", emboss=False, icon_value=layout.icon(mat))
+        elif self.layout_type in {'GRID'}:
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon_value=layout.icon(mat))
+
+
+# -------------------------------------
+# Addon registering boilerplate     
+# -------------------------------------
+
+classes_to_register = {
+    # Operators
+    MaterialSlotCleanup,
+    MaterialCreateAssign,
+    MaterialPick,
+    MaterialAssign,
+    # Prefs
+    AddonPrefs,
+    # UI
+    Material_PG_Collection,
+    Material_UL_items,
+    VIEW3D_MT_MaterialList,
+    VIEW3D_MT_Material,
+    VIEW3D_MT_Material_PIE,
+}  
 
 addon_keymaps = []
 
-def register():
-    # ui
-    bpy.utils.register_class(AddonPrefs)
-    bpy.utils.register_class(VIEW3D_MT_Material)
-    bpy.utils.register_class(VIEW3D_MT_Material_PIE)
-    
-    # operators
-    bpy.utils.register_class(MaterialSlotCleanup)
-    bpy.utils.register_class(MaterialCreateAssign)
-    bpy.utils.register_class(MaterialPick)
-
-    # keymaps & prefs
+def get_preferences():
     preferences = bpy.context.preferences
     addon_prefs = preferences.addons[__name__].preferences
+    return addon_prefs
 
+def register():    
+    for c in classes_to_register:
+        bpy.utils.register_class(c)    
+  
+    # keymaps & prefs   
+    addon_prefs = get_preferences()
     if addon_prefs.menu_visible:
         bpy.types.VIEW3D_MT_editor_menus.append(VIEW3D_MT_Material.menu_draw)
 
@@ -375,39 +570,26 @@ def register():
         keymap = wm.keyconfigs.addon.keymaps.new(name='3D View', space_type='VIEW_3D')
 
         keymap_item = keymap.keymap_items.new("wm.call_menu_pie", type="NONE", value='PRESS', ctrl=False)
-        keymap_item.properties.name = "material.create_assign_pie" 
-        print(keymap_item)             
+        keymap_item.properties.name = "VIEW3D_MT_create_assign_pie"         
         addon_keymaps.append((keymap, keymap_item))
 
         keymap_item = keymap.keymap_items.new("wm.call_menu", type="NONE", value='PRESS', ctrl=False)
         keymap_item.properties.name = "VIEW3D_MT_Material"              
-        print(keymap_item)
         addon_keymaps.append((keymap, keymap_item))
-
 
 
 def unregister():   
     # keymaps & prefs
-    preferences = bpy.context.preferences
-    addon_prefs = preferences.addons[__name__].preferences
+    addon_prefs = get_preferences()
+    if addon_prefs.menu_visible:
+        bpy.types.VIEW3D_MT_editor_menus.remove(VIEW3D_MT_Material.menu_draw)
 
     for keymap, keymap_item in addon_keymaps:
         keymap.keymap_items.remove(keymap_item)
     addon_keymaps.clear()   
-
-    if addon_prefs.menu_visible:
-        bpy.types.VIEW3D_MT_editor_menus.remove(VIEW3D_MT_Material.menu_draw)
-
-    # ui
-    bpy.utils.unregister_class(AddonPrefs)
-    bpy.types.VIEW3D_MT_editor_menus.remove(VIEW3D_MT_Material.menu_draw)
-    bpy.utils.unregister_class(VIEW3D_MT_Material)
-    bpy.utils.unregister_class(VIEW3D_MT_Material_PIE)
-
-    # operators
-    bpy.utils.unregister_class(MaterialSlotCleanup)
-    bpy.utils.unregister_class(MaterialCreateAssign)
-    bpy.utils.unregister_class(MaterialPick)
+    
+    for c in classes_to_register:
+        bpy.utils.unregister_class(c)       
 
 
 if __name__ == "__main__":
